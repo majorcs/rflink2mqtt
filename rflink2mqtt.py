@@ -8,17 +8,18 @@ from enum import Enum
 from typing import Any, Callable, Dict, Generator, cast
 
 
-serialdev = '/dev/ttyACM0'
-broker = 'x.x.x.x'
+serialdev = '/dev/ttyUSB0'
+broker = '192.168.88.33'
 DELIM = ';'
 
+logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('rflink2mqtt')
-hdlr = logging.FileHandler('/var/log/rflink2mqtt.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-hdlr.setFormatter(formatter)
-logger.addHandler(hdlr) 
-#logger.setLevel(logging.WARNING)
-logger.setLevel(logging.INFO)
+#hdlr = logging.FileHandler('/var/log/rflink2mqtt.log')
+#formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+#hdlr.setFormatter(formatter)
+#logger.addHandler(hdlr) 
+logger.setLevel(logging.DEBUG)
+#logger.setLevel(logging.INFO)
 
 ser = serial.Serial(
         port=serialdev,
@@ -127,32 +128,24 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe("rflink/tx",0)
 
 def on_message(client, userdata, message):
-	#print ("Send to RFLINK " + str(message.payload.decode("utf-8")))
 	logging.info("Send to RFLINK " + str(message.payload.decode("utf-8")))
-	#my_logger.debug("Send to RFLINK: " + str(message.payload.decode("utf-8")))
         ser.write( str(message.payload.decode("utf-8"))+"\r\n")
 
 def decode_packet(packet):
-	#print ("DEBUG: " + packet)
 	logger.info(packet)
 	try:
 		node_id, _, protocol, attrs = x.split(DELIM, 3)
 	except ValueError:
-		#logging.warn("Could not split line: %s", line)
-		#print ("Could not split line: %s", packet)
 		logger.error("Could not split line: " + packet)
 		return
 
-	#print ("node_id: " + node_id + "\n")
 	logger.info("node_id: " + node_id)
-	#print ("protocol: " + protocol + "\n")
 	logger.info("protocol: " + protocol)
 	switch = None
 	find = 0
 	for attr in filter(None, attrs.strip(DELIM).split(DELIM)):
 		key, value = attr.lower().split('=')
 		find = 1
-		#print ("key is : " + key + " / Value is : " + value )
 		if key in VALUE_TRANSLATION:
 			value = VALUE_TRANSLATION.get(key)(value)
 		name = PACKET_FIELDS.get(key, key)
@@ -163,16 +156,13 @@ def decode_packet(packet):
 		else:
 			if switch:
 				client.publish("rflink/"+name+"/"+id+"/"+switch, value, 0)
-				#print "rflink/%s/%s/%s / value: %s" % (name, id, switch, value)
 				logger.info("rflink/" + str(name) + "/" + str(id) + "/" + str(switch) + " / value: " + str(value))
 			else:
 				client.publish("rflink/"+name+"/"+id, value, 0)
-				#print "rflink/%s/%s / value: %s" % (name, id, value)
 				logger.info("rflink/" + str(name) + "/" + str(id) + " / value: " + str(value))
 		
 	if find == 0:
 		client.publish("rflink/rx", packet, 0)
-		#print ("not find protocol of other: " + packet)
 		logger.error("not find protocol of other: " + packet)
 		
 	return 
@@ -180,9 +170,11 @@ def decode_packet(packet):
 
 client = mqtt.Client()
 client.connect(broker, 1883)
+logger.debug("MQTT connected")
 client.on_connect = on_connect
 client.on_message = on_message
 client.loop_start()
+logger.debug("MQTT loop initialized")
 
 while True:
     x=ser.readline()
